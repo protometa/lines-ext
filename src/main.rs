@@ -22,21 +22,27 @@ b: 3
     let lines = cursor.lines();
 
     let lines: Vec<String> = lines
+        // Stream of Result<String>
         .scan(
             String::new(),
-            |state, line| -> Ready<Option<Result<String, std::io::Error>>> {
+            |state, line| -> Ready<Option<Result<Option<String>, std::io::Error>>> {
                 future::ready(
                     line.map(|line| {
-                        state.push('\n');
-                        state.push_str(&line);
-                        Some(state.trim().to_owned())
+                        Some(if line == "---" {
+                            Some(state.trim().to_owned())
+                        } else {
+                            state.push('\n');
+                            state.push_str(&line);
+                            None
+                        })
                     })
                     .transpose(),
                 )
-                // // take result of option and transpose to option of result
-                // future::ready(Some(Ok(state.clone())))
             },
         )
+        // Stream of Result<Option<String>>
+        .try_filter_map(|x| future::ready(Ok(x)))
+        // Stream of Result<String>
         .try_collect()
         .await?;
 
