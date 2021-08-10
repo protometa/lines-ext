@@ -21,7 +21,8 @@ b: 3
     );
     let lines = cursor.lines();
 
-    let lines: Vec<String> = lines
+    let docs: Vec<String> = lines
+        .chain(stream::once(async { Ok("---".to_string()) }))
         // Stream of Result<String>
         .scan(
             String::new(),
@@ -29,7 +30,9 @@ b: 3
                 future::ready(
                     line.map(|line| {
                         Some(if line == "---" {
-                            Some(state.trim().to_owned())
+                            let chunk = state.trim().to_owned();
+                            state.clear();
+                            Some(chunk)
                         } else {
                             state.push('\n');
                             state.push_str(&line);
@@ -43,10 +46,11 @@ b: 3
         // Stream of Result<Option<String>>
         .try_filter_map(|x| future::ready(Ok(x)))
         // Stream of Result<String>
+        .try_filter(|x| future::ready(x.len() > 0))
         .try_collect()
         .await?;
 
-    dbg!(lines);
+    dbg!(docs);
 
     // while let Some(line) = lines.next().await {
     //     dbg!(line?);
