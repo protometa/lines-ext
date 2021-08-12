@@ -669,6 +669,7 @@ dependencies = [
  "futures",
  "itertools",
  "num-traits",
+ "pin-project-lite",
  "rrule",
  "rust_decimal",
  "serde",
