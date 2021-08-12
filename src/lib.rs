@@ -45,14 +45,6 @@ type ChunkByLineStream<R> = TryFilter<
     FnFilterEmpty,
 >;
 
-fn filter_none(x: Option<String>) -> Ready<Result<Option<String>, std::io::Error>> {
-    future::ready(Ok(x))
-}
-
-fn filter_empty(x: &String) -> Ready<bool> {
-    future::ready(x.len() > 0)
-}
-
 fn scanner(
     delim: String,
 ) -> Box<
@@ -87,9 +79,9 @@ impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
             .chain(stream::once(future::ready(Ok(delim.to_owned()))))
             .scan(String::new(), scanner(delim.to_owned()))
             // Stream of Result<Option<String>>
-            .try_filter_map(filter_none as FnFilterNone)
+            .try_filter_map((|x| future::ready(Ok(x))) as FnFilterNone)
             // Stream of Result<String>
-            .try_filter(filter_empty as FnFilterEmpty);
+            .try_filter((|x| future::ready(x.len() > 0)) as FnFilterEmpty);
 
         Self { stream }
     }
