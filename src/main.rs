@@ -81,12 +81,87 @@ fn filter_empty(x: &String) -> Ready<bool> {
 
 type FnFilterEmpty = fn(&String) -> Ready<bool>;
 
-type ChunkByLineStream<R> =
-    TryFilter<async_std::io::Lines<R>, futures::future::Ready<bool>, FnFilterEmpty>;
+// type FnScanner = Box<
+//     dyn Fn(
+//         &mut String,
+//         std::result::Result<String, std::io::Error>,
+//     )
+//         -> futures::future::Ready<Option<std::result::Result<Option<String>, std::io::Error>>>,
+// >;
+// type FnFilterNone = Box<dyn Fn(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>>;
+type FnScanner = Box<
+    (dyn for<'r> Fn(
+        &'r mut String,
+        std::result::Result<String, std::io::Error>,
+    ) -> futures::future::Ready<
+        Option<std::result::Result<Option<String>, std::io::Error>>,
+    > + 'static),
+>;
+type FnFilterNone = Box<
+    (dyn Fn(
+        Option<String>,
+    ) -> futures::future::Ready<std::result::Result<Option<String>, std::io::Error>>
+         + 'static),
+>;
 
-impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
+type ChunkByLineStream<R> = TryFilterMap<
+    Scan<Lines<R>, String, Ready<Option<Result<Option<String>, std::io::Error>>>, FnScanner>,
+    Ready<Result<Option<String>, std::io::Error>>,
+    FnFilterNone,
+>;
+
+impl<R: BufRead>
+    ChunkByLine<
+        TryFilterMap<
+            futures::stream::Scan<
+                async_std::io::Lines<R>,
+                String,
+                futures::future::Ready<Option<std::result::Result<Option<String>, std::io::Error>>>,
+                Box<
+                    (dyn for<'r> Fn(
+                        &'r mut String,
+                        std::result::Result<String, std::io::Error>,
+                    ) -> futures::future::Ready<
+                        Option<std::result::Result<Option<String>, std::io::Error>>,
+                    > + 'static),
+                >,
+            >,
+            futures::future::Ready<std::result::Result<Option<String>, std::io::Error>>,
+            Box<
+                (dyn Fn(
+                    Option<String>,
+                ) -> futures::future::Ready<
+                    std::result::Result<Option<String>, std::io::Error>,
+                > + 'static),
+            >,
+        >,
+    >
+{
     pub(crate) fn new(lines: Lines<R>, delimiter: &str) -> Self {
-        let stream = lines.try_filter(filter_empty as FnFilterEmpty);
+        let delimiter_cp = delimiter.clone();
+        let stream = lines.scan(
+            String::new(),
+            Box::new(
+                move |state: &mut String,
+                      line: Result<String, std::io::Error>|
+                      -> Ready<Option<Result<Option<String>, std::io::Error>>> {
+                    future::ready(
+                        line.map(|line| {
+                            Some(if line == delimiter_cp {
+                                let chunk = state.to_owned();
+                                state.clear();
+                                Some(chunk)
+                            } else {
+                                state.push_str(&line);
+                                state.push('\n');
+                                None
+                            })
+                        })
+                        .transpose(),
+                    )
+                },
+            ),
+        ).try_filter_map(Box::new(|x| future::ready(Ok(x))));
         Self { stream }
     }
     // delegate_access_inner!(stream, St, ());
