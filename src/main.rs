@@ -1,13 +1,11 @@
 use anyhow::Result;
-use async_std::io;
-use async_std::io::prelude::*;
-use async_std::io::{stdin, BufRead, BufReader, Cursor, Lines};
+
+use async_std::io::{BufRead, Lines};
 use core::pin::Pin;
-use futures::future::{self, Future, Ready};
+use futures::future::{self, Ready};
 use futures::stream::{
-    self, Chain, Once, Scan, Stream, StreamExt, TryFilter, TryFilterMap, TryStream, TryStreamExt,
+    self, Chain, Once, Scan, Stream, StreamExt, TryFilter, TryFilterMap, TryStreamExt,
 };
-// use clap::{App, Arg};
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
 
@@ -48,16 +46,15 @@ type ChunkByLineStream<R> = TryFilter<
 >;
 
 impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
-    pub(crate) fn new(lines: Lines<R>, delimiter: String) -> Self {
-        let delimiter2 = delimiter.clone();
-
+    pub(crate) fn new(lines: Lines<R>, delimiter: &str) -> Self {
+        let delimiter_cp = delimiter.to_owned();
         let scanner: FnScanner = Box::new(
             move |state: &mut String,
                   line: Result<String, std::io::Error>|
                   -> Ready<Option<Result<Option<String>, std::io::Error>>> {
                 future::ready(
                     line.map(|line| {
-                        Some(if line == delimiter2 {
+                        Some(if line == delimiter_cp {
                             let chunk = state.to_owned();
                             state.clear();
                             Some(chunk)
@@ -77,7 +74,7 @@ impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
 
         let stream = lines
             // Stream of Result<String>
-            .chain(stream::once(future::ready(Ok(delimiter))))
+            .chain(stream::once(future::ready(Ok(delimiter.to_owned()))))
             .scan(String::new(), scanner)
             // Stream of Result<Option<String>>
             .try_filter_map(filter_none)
@@ -86,7 +83,7 @@ impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
 
         Self { stream }
     }
-    // delegate_access_inner!(stream, St, ());
+    // delegate_access_inner!(stream, St, ()); // TODO?
 }
 
 impl<S: Stream<Item = Result<String, std::io::Error>>> Stream for ChunkByLine<S> {
@@ -103,11 +100,11 @@ impl<S: Stream<Item = Result<String, std::io::Error>>> Stream for ChunkByLine<S>
 }
 
 pub trait ChunkByLineExt<R: BufRead> {
-    fn chunk_by_line(self, delimiter: String) -> ChunkByLine<ChunkByLineStream<R>>;
+    fn chunk_by_line(self, delimiter: &str) -> ChunkByLine<ChunkByLineStream<R>>;
 }
 
 impl<R: BufRead> ChunkByLineExt<R> for Lines<R> {
-    fn chunk_by_line(self, delimiter: String) -> ChunkByLine<ChunkByLineStream<R>> {
+    fn chunk_by_line(self, delimiter: &str) -> ChunkByLine<ChunkByLineStream<R>> {
         ChunkByLine::new(self, delimiter)
     }
 }
@@ -121,6 +118,8 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_std::io::prelude::*;
+    use async_std::io::Cursor;
 
     const BYTES: &[u8; 40] = b"~~~
 multi
@@ -138,7 +137,7 @@ chunk
         // let docs: Vec<String> = chunk_by_line(lines, "~~~").try_collect().await?;
         let docs: Vec<String> = Cursor::new(BYTES)
             .lines()
-            .chunk_by_line("~~~".to_string())
+            .chunk_by_line("~~~")
             .try_collect()
             .await?;
         assert_eq!(docs, vec!["multi\n\nline\nchunk\n", "another\nchunk\n"]);
