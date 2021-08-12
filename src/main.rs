@@ -11,59 +11,38 @@ use futures::stream::{
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
 
-pub fn chunk_by_line<R: BufRead>(
-    lines: Lines<R>,
-    delimiter: &str,
-) -> impl Stream<Item = Result<String, std::io::Error>> {
-    let delimiter2 = delimiter.to_owned();
-    lines
-        .chain(stream::once(future::ready(Ok(delimiter.to_owned()))))
-        // Stream of Result<String>
-        .scan(
-            String::new(),
-            move |state, line| -> Ready<Option<Result<Option<String>, std::io::Error>>> {
-                future::ready(
-                    line.map(|line| {
-                        Some(if line == delimiter2 {
-                            let chunk = state.to_owned();
-                            state.clear();
-                            Some(chunk)
-                        } else {
-                            state.push_str(&line);
-                            state.push('\n');
-                            None
-                        })
-                    })
-                    .transpose(),
-                )
-            },
-        )
-        // Stream of Result<Option<String>>
-        .try_filter_map(|x| future::ready(Ok(x)))
-        // Stream of Result<String>
-        .try_filter(|x| future::ready(x.len() > 0))
-}
-
-// TryFilter<
-//     TryFilterMap<
-//         Scan<
-//             Chain<
-//                 Lines<R>,
-//                 Once<Ready<Result<String, std::io::Error>>>
-//             >,
-//             String,
-//             Ready<Option<Result<Option<String>, std::io::Error>>>,
-//             F1
-//         >, Ready<Result<Option<String>,std::io::Error>>,
-//         F2
-//     >,
-//     Ready<bool>,
-//     F3
-// >
-// TryFilter< TryFilterMap< Scan< Chain< Lines<R>, Once<Ready<Result<String, std::io::Error>>> >, String, Ready<Option<Result<Option<String>, std::io::Error>>>, F1 >, Ready<Result<Option<String>,std::io::Error>>, F2 >, Ready<bool>, F3 >
-// F1: FnMut( &'a mut String, Result<String, std::io::Error>) -> Ready<Option<Result<Option<String>, std::io::Error>>>,
-// F2: FnMut(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>,
-// F3: FnMut(String) -> bool,
+// pub fn chunk_by_line<R: BufRead>(
+//     lines: Lines<R>,
+//     delimiter: &str,
+// ) -> impl Stream<Item = Result<String, std::io::Error>> {
+//     let delimiter2 = delimiter.to_owned();
+//     lines
+//         .chain(stream::once(future::ready(Ok(delimiter.to_owned()))))
+//         // Stream of Result<String>
+//         .scan(
+//             String::new(),
+//             move |state, line| -> Ready<Option<Result<Option<String>, std::io::Error>>> {
+//                 future::ready(
+//                     line.map(|line| {
+//                         Some(if line == delimiter2 {
+//                             let chunk = state.to_owned();
+//                             state.clear();
+//                             Some(chunk)
+//                         } else {
+//                             state.push_str(&line);
+//                             state.push('\n');
+//                             None
+//                         })
+//                     })
+//                     .transpose(),
+//                 )
+//             },
+//         )
+//         // Stream of Result<Option<String>>
+//         .try_filter_map(|x| future::ready(Ok(x)))
+//         // Stream of Result<String>
+//         .try_filter(|x| future::ready(x.len() > 0))
+// }
 
 pin_project! {
     /// Stream for the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method.
@@ -75,20 +54,6 @@ pin_project! {
     }
 }
 
-fn filter_empty(x: &String) -> Ready<bool> {
-    future::ready(x.len() > 0)
-}
-
-type FnFilterEmpty = fn(&String) -> Ready<bool>;
-
-// type FnScanner = Box<
-//     dyn Fn(
-//         &mut String,
-//         std::result::Result<String, std::io::Error>,
-//     )
-//         -> futures::future::Ready<Option<std::result::Result<Option<String>, std::io::Error>>>,
-// >;
-// type FnFilterNone = Box<dyn Fn(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>>;
 type FnScanner = Box<
     (dyn for<'r> Fn(
         &'r mut String,
@@ -97,6 +62,7 @@ type FnScanner = Box<
         Option<std::result::Result<Option<String>, std::io::Error>>,
     > + 'static),
 >;
+
 type FnFilterNone = Box<
     (dyn Fn(
         Option<String>,
@@ -113,46 +79,25 @@ type ChunkByLineStream<R> = TryFilterMap<
 impl<R: BufRead>
     ChunkByLine<
         TryFilterMap<
-            futures::stream::Scan<
-                async_std::io::Lines<R>,
+            Scan<
+                Lines<R>,
                 String,
-                futures::future::Ready<Option<std::result::Result<Option<String>, std::io::Error>>>,
-                Box<
-                    (dyn for<'r> Fn(
-                        &'r mut String,
-                        std::result::Result<String, std::io::Error>,
-                    ) -> futures::future::Ready<
-                        Option<std::result::Result<Option<String>, std::io::Error>>,
-                    > + 'static),
-                >,
+                Ready<Option<Result<Option<String>, std::io::Error>>>,
+                FnScanner,
             >,
-            futures::future::Ready<std::result::Result<Option<String>, std::io::Error>>,
-            Box<
-                (dyn Fn(
-                    Option<String>,
-                ) -> futures::future::Ready<
-                    std::result::Result<Option<String>, std::io::Error>,
-                > + 'static),
-            >,
+            futures::future::Ready<Result<Option<String>, std::io::Error>>,
+            FnFilterNone,
         >,
     >
 {
-    pub(crate) fn new(lines: Lines<R>, delimiter: &'static str) -> Self {
-        let delimiter_cp = delimiter.clone();
-        let f1: Box<
-            dyn for<'r> Fn(
-                &'r mut String,
-                std::result::Result<String, std::io::Error>,
-            ) -> futures::future::Ready<
-                Option<std::result::Result<Option<String>, std::io::Error>>,
-            >,
-        > = Box::new(
+    pub(crate) fn new(lines: Lines<R>, delimiter: String) -> Self {
+        let scanner: FnScanner = Box::new(
             move |state: &mut String,
                   line: Result<String, std::io::Error>|
                   -> Ready<Option<Result<Option<String>, std::io::Error>>> {
                 future::ready(
                     line.map(|line| {
-                        Some(if line == delimiter_cp {
+                        Some(if line == delimiter {
                             let chunk = state.to_owned();
                             state.clear();
                             Some(chunk)
@@ -166,13 +111,8 @@ impl<R: BufRead>
                 )
             },
         );
-        let f2: Box<
-            dyn Fn(
-                Option<String>,
-            )
-                -> futures::future::Ready<std::result::Result<Option<String>, std::io::Error>>,
-        > = Box::new(|x| future::ready(Ok(x)));
-        let stream = lines.scan(String::new(), f1).try_filter_map(f2);
+        let somes: FnFilterNone = Box::new(|x| future::ready(Ok(x)));
+        let stream = lines.scan(String::new(), scanner).try_filter_map(somes);
         Self { stream }
     }
     // delegate_access_inner!(stream, St, ());
@@ -191,15 +131,15 @@ impl<S: Stream<Item = Result<String, std::io::Error>>> Stream for ChunkByLine<S>
     }
 }
 
-// pub trait ChunkByLineExt<R: BufRead> {
-//     fn chunk_by_line(self, delimiter: &str) -> ChunkByLine<ChunkByLineStream<R>>;
-// }
+pub trait ChunkByLineExt<R: BufRead> {
+    fn chunk_by_line(self, delimiter: String) -> ChunkByLine<ChunkByLineStream<R>>;
+}
 
-// impl<R: BufRead> ChunkByLineExt<R> for Lines<R> {
-//     fn chunk_by_line(self, delimiter: &str) -> ChunkByLine<ChunkByLineStream<R>> {
-//         ChunkByLine::new(self, delimiter)
-//     }
-// }
+impl<R: BufRead> ChunkByLineExt<R> for Lines<R> {
+    fn chunk_by_line(self, delimiter: String) -> ChunkByLine<ChunkByLineStream<R>> {
+        ChunkByLine::new(self, delimiter)
+    }
+}
 
 #[async_std::main]
 async fn main() -> Result<()> {
@@ -236,15 +176,12 @@ chunk
     async fn chunks_by_line() -> Result<()> {
         // let lines = Cursor::new(bytes2).lines();
         // let docs: Vec<String> = chunk_by_line(lines, "~~~").try_collect().await?;
-        // let docs: Vec<String> = Cursor::new(BYTES2)
-        //     .lines()
-        //     .chunk_by_line("~~~")
-        //     .try_collect()
-        //     .await?;
-        // assert_eq!(
-        //     docs,
-        //     vec!["~~~", "mutli", "line", "chunk", "~~~", "another", "chunk"]
-        // );
+        let docs: Vec<String> = Cursor::new(BYTES2)
+            .lines()
+            .chunk_by_line("~~~".to_string())
+            .try_collect()
+            .await?;
+        assert_eq!(docs, vec!["", "mutli\n\nline\n\nchunk\n"]);
         Ok(())
     }
 }
