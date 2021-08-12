@@ -9,17 +9,6 @@ use futures::stream::{
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
 
-type FnScanner = Box<
-    dyn Fn(
-        &mut String,
-        Result<String, std::io::Error>,
-    ) -> Ready<Option<Result<Option<String>, std::io::Error>>>,
->;
-
-type FnFilterNone = fn(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>;
-
-type FnFilterEmpty = fn(&String) -> Ready<bool>;
-
 type ChunkByLineStream<R> = TryFilter<
     TryFilterMap<
         Scan<
@@ -34,6 +23,17 @@ type ChunkByLineStream<R> = TryFilter<
     Ready<bool>,
     FnFilterEmpty,
 >;
+
+type FnScanner = Box<
+    dyn Fn(
+        &mut String,
+        Result<String, std::io::Error>,
+    ) -> Ready<Option<Result<Option<String>, std::io::Error>>>,
+>;
+
+type FnFilterNone = fn(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>;
+
+type FnFilterEmpty = fn(&String) -> Ready<bool>;
 
 pin_project! {
     /// Stream for the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method.
