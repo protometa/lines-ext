@@ -48,6 +48,7 @@ type ChunkByLineStream<R> = TryFilter<
 impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
     pub(crate) fn new(lines: Lines<R>, delimiter: &str) -> Self {
         let delimiter_cp = delimiter.to_owned();
+        // collects chunks in scan state, emitting Some(chunk) on delimiter, else None
         let scanner: FnScanner = Box::new(
             move |state: &mut String,
                   line: Result<String, std::io::Error>|
@@ -74,6 +75,7 @@ impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
 
         let stream = lines
             // Stream of Result<String>
+            // append delimiter so scanner knows when to dump last
             .chain(stream::once(future::ready(Ok(delimiter.to_owned()))))
             .scan(String::new(), scanner)
             // Stream of Result<Option<String>>
