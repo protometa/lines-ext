@@ -9,16 +9,6 @@ use futures::stream::{
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
 
-pin_project! {
-    /// Stream for the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method.
-    #[must_use = "streams do nothing unless polled"]
-    pub struct ChunkByLine<S>
-    {
-        #[pin]
-        stream: S,
-    }
-}
-
 type FnScanner = Box<
     dyn Fn(
         &mut String,
@@ -44,6 +34,16 @@ type ChunkByLineStream<R> = TryFilter<
     Ready<bool>,
     FnFilterEmpty,
 >;
+
+pin_project! {
+    /// Stream for the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method.
+    #[must_use = "streams do nothing unless polled"]
+    pub struct ChunkByLine<R: BufRead>
+    {
+        #[pin]
+        stream: ChunkByLineStream<R>,
+    }
+}
 
 fn scanner(
     delim: String,
@@ -71,7 +71,7 @@ fn scanner(
     })
 }
 
-impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
+impl<R: BufRead> ChunkByLine<R> {
     pub(crate) fn new(lines: Lines<R>, delim: &str) -> Self {
         let stream = lines
             // Stream of Result<String>
@@ -88,7 +88,7 @@ impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
     // delegate_access_inner!(stream, St, ()); // TODO?
 }
 
-impl<S: Stream<Item = Result<String, std::io::Error>>> Stream for ChunkByLine<S> {
+impl<R: BufRead> Stream for ChunkByLine<R> {
     type Item = Result<String, std::io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -102,11 +102,11 @@ impl<S: Stream<Item = Result<String, std::io::Error>>> Stream for ChunkByLine<S>
 }
 
 pub trait ChunkByLineExt<R: BufRead> {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<ChunkByLineStream<R>>;
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<R>;
 }
 
 impl<R: BufRead> ChunkByLineExt<R> for Lines<R> {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<ChunkByLineStream<R>> {
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<R> {
         ChunkByLine::new(self, delim)
     }
 }
@@ -138,7 +138,10 @@ chunk
             .chunk_by_line("~~~")
             .try_collect()
             .await?;
-        assert_eq!(docs, vec!["multi\n\nline\nchunk\n", "another\nchunk\n"]);
+        assert_eq!(
+            dbg!(docs),
+            vec!["multi\n\nline\nchunk\n", "another\nchunk\n"]
+        );
         Ok(())
     }
 }
