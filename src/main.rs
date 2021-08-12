@@ -117,9 +117,11 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::ChunkByLineExt;
+    use anyhow::Result;
     use async_std::io::prelude::*;
     use async_std::io::Cursor;
+    use futures::stream::TryStreamExt;
 
     const BYTES: &[u8; 40] = b"~~~
 multi
