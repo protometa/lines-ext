@@ -26,9 +26,9 @@ type FnScanner = Box<
     ) -> Ready<Option<Result<Option<String>, std::io::Error>>>,
 >;
 
-type FnFilterNone = Box<dyn Fn(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>>;
+type FnFilterNone = fn(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>;
 
-type FnFilterEmpty = Box<dyn Fn(&String) -> Ready<bool>>;
+type FnFilterEmpty = fn(&String) -> Ready<bool>;
 
 type ChunkByLineStream<R> = TryFilter<
     TryFilterMap<
@@ -45,43 +45,51 @@ type ChunkByLineStream<R> = TryFilter<
     FnFilterEmpty,
 >;
 
+fn filter_none(x: Option<String>) -> Ready<Result<Option<String>, std::io::Error>> {
+    future::ready(Ok(x))
+}
+
+fn filter_empty(x: &String) -> Ready<bool> {
+    future::ready(x.len() > 0)
+}
+
+fn scanner(
+    delim: String,
+) -> Box<
+    dyn Fn(
+        &mut String,
+        Result<String, std::io::Error>,
+    ) -> Ready<Option<Result<Option<String>, std::io::Error>>>,
+> {
+    Box::new(move |state, line| {
+        future::ready(
+            line.map(|line| {
+                Some(if line == delim {
+                    let chunk = state.to_owned();
+                    state.clear();
+                    Some(chunk)
+                } else {
+                    state.push_str(&line);
+                    state.push('\n');
+                    None
+                })
+            })
+            .transpose(),
+        )
+    })
+}
+
 impl<R: BufRead> ChunkByLine<ChunkByLineStream<R>> {
-    pub(crate) fn new(lines: Lines<R>, delimiter: &str) -> Self {
-        let delimiter_cp = delimiter.to_owned();
-        // collects chunks in scan state, emitting Some(chunk) on delimiter, else None
-        let scanner: FnScanner = Box::new(
-            move |state: &mut String,
-                  line: Result<String, std::io::Error>|
-                  -> Ready<Option<Result<Option<String>, std::io::Error>>> {
-                future::ready(
-                    line.map(|line| {
-                        Some(if line == delimiter_cp {
-                            let chunk = state.to_owned();
-                            state.clear();
-                            Some(chunk)
-                        } else {
-                            state.push_str(&line);
-                            state.push('\n');
-                            None
-                        })
-                    })
-                    .transpose(),
-                )
-            },
-        );
-
-        let filter_none: FnFilterNone = Box::new(|x| future::ready(Ok(x)));
-        let filter_empty: FnFilterEmpty = Box::new(|x: &String| future::ready(x.len() > 0));
-
+    pub(crate) fn new(lines: Lines<R>, delim: &str) -> Self {
         let stream = lines
             // Stream of Result<String>
-            // append delimiter so scanner knows when to dump last
-            .chain(stream::once(future::ready(Ok(delimiter.to_owned()))))
-            .scan(String::new(), scanner)
+            // append delim so scanner knows when to dump last
+            .chain(stream::once(future::ready(Ok(delim.to_owned()))))
+            .scan(String::new(), scanner(delim.to_owned()))
             // Stream of Result<Option<String>>
-            .try_filter_map(filter_none)
+            .try_filter_map(filter_none as FnFilterNone)
             // Stream of Result<String>
-            .try_filter(filter_empty);
+            .try_filter(filter_empty as FnFilterEmpty);
 
         Self { stream }
     }
@@ -102,19 +110,13 @@ impl<S: Stream<Item = Result<String, std::io::Error>>> Stream for ChunkByLine<S>
 }
 
 pub trait ChunkByLineExt<R: BufRead> {
-    fn chunk_by_line(self, delimiter: &str) -> ChunkByLine<ChunkByLineStream<R>>;
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<ChunkByLineStream<R>>;
 }
 
 impl<R: BufRead> ChunkByLineExt<R> for Lines<R> {
-    fn chunk_by_line(self, delimiter: &str) -> ChunkByLine<ChunkByLineStream<R>> {
-        ChunkByLine::new(self, delimiter)
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<ChunkByLineStream<R>> {
+        ChunkByLine::new(self, delim)
     }
-}
-
-#[async_std::main]
-async fn main() -> Result<()> {
-    println!("Hello World");
-    Ok(())
 }
 
 #[cfg(test)]
