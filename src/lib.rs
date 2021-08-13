@@ -39,6 +39,23 @@ pin_project! {
     }
 }
 
+impl<R: BufRead> ChunkByLine<R> {
+    pub(crate) fn new(lines: Lines<R>, delim: &str) -> Self {
+        let stream = lines
+            // Stream of Result<String>
+            // append delim so scanner knows when to dump last
+            .chain(stream::once(future::ready(Ok(delim.to_owned()))))
+            .scan(String::new(), scanner(delim.to_owned()))
+            // Stream of Result<Option<String>>
+            .try_filter_map((|x| future::ready(Ok(x))) as FnFilterNone)
+            // Stream of Result<String>
+            .try_filter((|x| future::ready(!x.is_empty())) as FnFilterEmpty);
+
+        Self { stream }
+    }
+    // delegate_access_inner!(stream, St, ()); // TODO?
+}
+
 fn scanner(delim: String) -> FnScanner {
     Box::new(move |state, line| {
         future::ready(
@@ -56,23 +73,6 @@ fn scanner(delim: String) -> FnScanner {
             .transpose(),
         )
     })
-}
-
-impl<R: BufRead> ChunkByLine<R> {
-    pub(crate) fn new(lines: Lines<R>, delim: &str) -> Self {
-        let stream = lines
-            // Stream of Result<String>
-            // append delim so scanner knows when to dump last
-            .chain(stream::once(future::ready(Ok(delim.to_owned()))))
-            .scan(String::new(), scanner(delim.to_owned()))
-            // Stream of Result<Option<String>>
-            .try_filter_map((|x| future::ready(Ok(x))) as FnFilterNone)
-            // Stream of Result<String>
-            .try_filter((|x| future::ready(!x.is_empty())) as FnFilterEmpty);
-
-        Self { stream }
-    }
-    // delegate_access_inner!(stream, St, ()); // TODO?
 }
 
 impl<R: BufRead> Stream for ChunkByLine<R> {
