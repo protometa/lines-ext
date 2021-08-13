@@ -129,36 +129,3 @@ impl<S: Stream<Item = Result<String>>> LinesExt<S> for S {
         ChunkByLine::new(self, delim)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::LinesExt;
-    use async_std::io::Cursor;
-    use futures::stream::TryStreamExt;
-    use futures::AsyncBufReadExt;
-    use std::io::Result;
-
-    const BYTES: &[u8; 40] = b"~~~
-multi
-
-line
-chunk
-~~~
-another
-chunk
-";
-
-    #[async_std::test]
-    async fn chunks_by_line() -> Result<()> {
-        let docs: Vec<String> = Cursor::new(BYTES)
-            .lines()
-            .chunk_by_line("~~~")
-            .try_collect()
-            .await?;
-        assert_eq!(
-            dbg!(docs),
-            vec!["multi\n\nline\nchunk\n", "another\nchunk\n"]
-        );
-        Ok(())
-    }
-}
