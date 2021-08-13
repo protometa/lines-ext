@@ -1,4 +1,8 @@
-use async_std::io::{BufRead, Lines};
+//! This contains an extension trait [`ChunkByLineExt`](self::ChunkByLineExt) for
+//! `Stream<Item = Result<String>>` such as that returned by [`AsyncBufReadExt::lines`](futures::io::AsyncBufReadExt::lines).
+//! The trait provides the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method which groups
+//! lines into chunks given a delimiter line that separates chunks.
+
 use core::pin::Pin;
 use futures::future::{self, Ready};
 use futures::stream::{
@@ -8,10 +12,10 @@ use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
 use std::io::Result;
 
-type ChunkByLineStream<R> = TryFilter<
+type ChunkByLineStream<S> = TryFilter<
     TryFilterMap<
         Scan<
-            Chain<Lines<R>, Once<Ready<Result<String>>>>,
+            Chain<S, Once<Ready<Result<String>>>>,
             String,
             Ready<Option<Result<Option<String>>>>,
             FnScanner,
@@ -32,15 +36,15 @@ type FnFilterEmpty = fn(&String) -> Ready<bool>;
 pin_project! {
     /// Stream for the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method.
     #[must_use = "streams do nothing unless polled"]
-    pub struct ChunkByLine<R: BufRead>
+    pub struct ChunkByLine<S: Stream<Item = Result<String>>>
     {
         #[pin]
-        stream: ChunkByLineStream<R>,
+        stream: ChunkByLineStream<S>,
     }
 }
 
-impl<R: BufRead> ChunkByLine<R> {
-    pub(crate) fn new(lines: Lines<R>, delim: &str) -> Self {
+impl<S: Stream<Item = Result<String>>> ChunkByLine<S> {
+    pub(crate) fn new(lines: S, delim: &str) -> Self {
         let stream = lines
             // Stream of Result<String>
             // append delim so scanner knows when to dump last
@@ -75,7 +79,7 @@ fn scanner(delim: String) -> FnScanner {
     })
 }
 
-impl<R: BufRead> Stream for ChunkByLine<R> {
+impl<S: Stream<Item = Result<String>>> Stream for ChunkByLine<S> {
     type Item = Result<String>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -88,12 +92,13 @@ impl<R: BufRead> Stream for ChunkByLine<R> {
     }
 }
 
-pub trait ChunkByLineExt<R: BufRead> {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<R>;
+/// An extension trait for `Stream`s of `Result<String>`s such as those provided by  that provides a variety of convenient
+pub trait ChunkByLineExt<S: Stream<Item = Result<String>>> {
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<S>;
 }
 
-impl<R: BufRead> ChunkByLineExt<R> for Lines<R> {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<R> {
+impl<S: Stream<Item = Result<String>>> ChunkByLineExt<S> for S {
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<S> {
         ChunkByLine::new(self, delim)
     }
 }
