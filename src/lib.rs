@@ -1,4 +1,3 @@
-use anyhow::Result;
 use async_std::io::{BufRead, Lines};
 use core::pin::Pin;
 use futures::future::{self, Ready};
@@ -7,30 +6,26 @@ use futures::stream::{
 };
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
+use std::io::Result;
 
 type ChunkByLineStream<R> = TryFilter<
     TryFilterMap<
         Scan<
-            Chain<Lines<R>, Once<Ready<Result<String, std::io::Error>>>>,
+            Chain<Lines<R>, Once<Ready<Result<String>>>>,
             String,
-            Ready<Option<Result<Option<String>, std::io::Error>>>,
+            Ready<Option<Result<Option<String>>>>,
             FnScanner,
         >,
-        Ready<Result<Option<String>, std::io::Error>>,
+        Ready<Result<Option<String>>>,
         FnFilterNone,
     >,
     Ready<bool>,
     FnFilterEmpty,
 >;
 
-type FnScanner = Box<
-    dyn Fn(
-        &mut String,
-        Result<String, std::io::Error>,
-    ) -> Ready<Option<Result<Option<String>, std::io::Error>>>,
->;
+type FnScanner = Box<dyn Fn(&mut String, Result<String>) -> Ready<Option<Result<Option<String>>>>>;
 
-type FnFilterNone = fn(Option<String>) -> Ready<Result<Option<String>, std::io::Error>>;
+type FnFilterNone = fn(Option<String>) -> Ready<Result<Option<String>>>;
 
 type FnFilterEmpty = fn(&String) -> Ready<bool>;
 
@@ -81,7 +76,7 @@ impl<R: BufRead> ChunkByLine<R> {
 }
 
 impl<R: BufRead> Stream for ChunkByLine<R> {
-    type Item = Result<String, std::io::Error>;
+    type Item = Result<String>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -106,10 +101,10 @@ impl<R: BufRead> ChunkByLineExt<R> for Lines<R> {
 #[cfg(test)]
 mod tests {
     use super::ChunkByLineExt;
-    use anyhow::Result;
     use async_std::io::prelude::*;
     use async_std::io::Cursor;
     use futures::stream::TryStreamExt;
+    use std::io::Result;
 
     const BYTES: &[u8; 40] = b"~~~
 multi
