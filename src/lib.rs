@@ -1,7 +1,35 @@
-//! This contains an extension trait [`ChunkByLineExt`](self::ChunkByLineExt) for
-//! `Stream<Item = Result<String>>` such as that returned by [`AsyncBufReadExt::lines`](futures::io::AsyncBufReadExt::lines).
+//! This contains an extension trait [`LinesExt`](self::LinesExt) for
+//! `Stream<Item = Result<String>>` such as those returned by [`AsyncBufReadExt::lines`](futures::io::AsyncBufReadExt::lines).
 //! The trait provides the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method which groups
 //! lines into chunks given a delimiter line that separates chunks.
+//!
+//! ```
+//! use async_std::io::Cursor;
+//! use futures::AsyncBufReadExt;
+//! use futures::stream::TryStreamExt;
+//! use lines_ext::LinesExt;
+//! # use std::io::Result;
+//! # use async_std::task;
+//!
+//! # fn main() -> Result<()> {
+//! # task::block_on(async {
+//! let bytes = b"~~~
+//! multi
+//! line
+//! chunk
+//! ~~~
+//! another
+//! chunk
+//! ";
+//!
+//! let chunks_stream = Cursor::new(bytes).lines().chunk_by_line("~~~");
+//!
+//! let chunks_vec: Vec<String> = chunks_stream.try_collect().await?;
+//! assert_eq!(chunks_vec, vec!["multi\nline\nchunk\n", "another\nchunk\n"]);
+//! # Ok(())
+//! # })
+//! # }
+//! ```
 
 use core::pin::Pin;
 use futures::future::{self, Ready};
@@ -34,7 +62,7 @@ type FnFilterNone = fn(Option<String>) -> Ready<Result<Option<String>>>;
 type FnFilterEmpty = fn(&String) -> Ready<bool>;
 
 pin_project! {
-    /// Stream for the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method.
+    /// Stream returned by the [`chunk_by_line`](self::LinesExt::chunk_by_line) method.
     #[must_use = "streams do nothing unless polled"]
     pub struct ChunkByLine<S: Stream<Item = Result<String>>>
     {
@@ -92,12 +120,11 @@ impl<S: Stream<Item = Result<String>>> Stream for ChunkByLine<S> {
     }
 }
 
-/// An extension trait for `Stream`s of `Result<String>`s such as those provided by  that provides a variety of convenient
-pub trait ChunkByLineExt<S: Stream<Item = Result<String>>> {
+pub trait LinesExt<S: Stream<Item = Result<String>>> {
     fn chunk_by_line(self, delim: &str) -> ChunkByLine<S>;
 }
 
-impl<S: Stream<Item = Result<String>>> ChunkByLineExt<S> for S {
+impl<S: Stream<Item = Result<String>>> LinesExt<S> for S {
     fn chunk_by_line(self, delim: &str) -> ChunkByLine<S> {
         ChunkByLine::new(self, delim)
     }
@@ -105,10 +132,10 @@ impl<S: Stream<Item = Result<String>>> ChunkByLineExt<S> for S {
 
 #[cfg(test)]
 mod tests {
-    use super::ChunkByLineExt;
-    use async_std::io::prelude::*;
+    use super::LinesExt;
     use async_std::io::Cursor;
     use futures::stream::TryStreamExt;
+    use futures::AsyncBufReadExt;
     use std::io::Result;
 
     const BYTES: &[u8; 40] = b"~~~

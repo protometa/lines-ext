@@ -1,5 +1,5 @@
 [package]
-name = "chunk-by-line-ext"
+name = "lines-ext"
 version = "1.0.0"
 edition = "2018"
 
