@@ -1,6 +1,6 @@
-//! This contains an extension trait [`LinesExt`](self::LinesExt) for
+//! This module contains an extension trait [`LinesExt`](self::LinesExt) for
 //! `Stream<Item = Result<String>>` such as those returned by [`AsyncBufReadExt::lines`](futures::io::AsyncBufReadExt::lines).
-//! The trait provides the [`chunk_by_line`](self::ChunkByLineExt::chunk_by_line) method which groups
+//! The trait provides the [`chunk_by_line`](self::LinesExt::chunk_by_line) method which groups
 //! lines into chunks given a delimiter line that separates chunks.
 //!
 //! ```
