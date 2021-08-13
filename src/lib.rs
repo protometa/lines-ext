@@ -44,14 +44,7 @@ pin_project! {
     }
 }
 
-fn scanner(
-    delim: String,
-) -> Box<
-    dyn Fn(
-        &mut String,
-        Result<String, std::io::Error>,
-    ) -> Ready<Option<Result<Option<String>, std::io::Error>>>,
-> {
+fn scanner(delim: String) -> FnScanner {
     Box::new(move |state, line| {
         future::ready(
             line.map(|line| {
@@ -80,7 +73,7 @@ impl<R: BufRead> ChunkByLine<R> {
             // Stream of Result<Option<String>>
             .try_filter_map((|x| future::ready(Ok(x))) as FnFilterNone)
             // Stream of Result<String>
-            .try_filter((|x| future::ready(x.len() > 0)) as FnFilterEmpty);
+            .try_filter((|x| future::ready(!x.is_empty())) as FnFilterEmpty);
 
         Self { stream }
     }
@@ -130,8 +123,6 @@ chunk
 
     #[async_std::test]
     async fn chunks_by_line() -> Result<()> {
-        // let lines = Cursor::new(bytes2).lines();
-        // let docs: Vec<String> = chunk_by_line(lines, "~~~").try_collect().await?;
         let docs: Vec<String> = Cursor::new(BYTES)
             .lines()
             .chunk_by_line("~~~")
