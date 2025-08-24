@@ -1,7 +1,7 @@
 [package]
 name = "lines-ext"
-version = "1.0.0"
-edition = "2018"
+version = "2.0.0"
+edition = "2024"
 
 [dependencies]
 futures = "0.3.8"

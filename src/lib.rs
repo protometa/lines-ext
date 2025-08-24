@@ -33,60 +33,31 @@
 
 use core::pin::Pin;
 use futures::future::{self, Ready};
-use futures::stream::{
-    self, Chain, Once, Scan, Stream, StreamExt, TryFilter, TryFilterMap, TryStreamExt,
-};
-use futures::task::{Context, Poll};
-use pin_project_lite::pin_project;
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use std::io::Result;
 
-type ChunkByLineStream<S> = TryFilter<
-    TryFilterMap<
-        Scan<
-            Chain<S, Once<Ready<Result<String>>>>,
-            String,
-            Ready<Option<Result<Option<String>>>>,
-            FnScanner,
-        >,
-        Ready<Result<Option<String>>>,
-        FnFilterNone,
-    >,
-    Ready<bool>,
-    FnFilterEmpty,
->;
+type ChunkByLine<'a> = Pin<Box<dyn Stream<Item = Result<String>> + Send + 'a>>;
 
-type FnScanner = Box<dyn Fn(&mut String, Result<String>) -> Ready<Option<Result<Option<String>>>>>;
-
-type FnFilterNone = fn(Option<String>) -> Ready<Result<Option<String>>>;
-
-type FnFilterEmpty = fn(&String) -> Ready<bool>;
-
-pin_project! {
-    /// Stream returned by the [`chunk_by_line`](self::LinesExt::chunk_by_line) method.
-    #[must_use = "streams do nothing unless polled"]
-    pub struct ChunkByLine<S: Stream<Item = Result<String>>>
-    {
-        #[pin]
-        stream: ChunkByLineStream<S>,
-    }
+pub trait LinesExt<'a, S: Stream<Item = Result<String>> + Send + 'a> {
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<'a>;
 }
 
-impl<S: Stream<Item = Result<String>>> ChunkByLine<S> {
-    pub(crate) fn new(lines: S, delim: &str) -> Self {
-        let stream = lines
-            // Stream of Result<String>
+impl<'a, S: Stream<Item = Result<String>> + Send + 'a> LinesExt<'a, S> for S {
+    fn chunk_by_line(self, delim: &str) -> ChunkByLine<'a> {
+        self.chain(stream::once(future::ready(Ok(delim.to_owned()))))
             // append delim so scanner knows when to dump last
             .chain(stream::once(future::ready(Ok(delim.to_owned()))))
             .scan(String::new(), scanner(delim.to_owned()))
             // Stream of Result<Option<String>>
-            .try_filter_map((|x| future::ready(Ok(x))) as FnFilterNone)
+            .try_filter_map(|x| future::ready(Ok(x)))
             // Stream of Result<String>
-            .try_filter((|x| future::ready(!x.is_empty())) as FnFilterEmpty);
-
-        Self { stream }
+            .try_filter(|x| future::ready(!x.is_empty()))
+            .boxed()
     }
-    // delegate_access_inner!(stream, St, ()); // TODO?
 }
+
+type FnScanner =
+    Box<dyn Fn(&mut String, Result<String>) -> Ready<Option<Result<Option<String>>>> + Send>;
 
 fn scanner(delim: String) -> FnScanner {
     Box::new(move |state, line| {
@@ -105,27 +76,4 @@ fn scanner(delim: String) -> FnScanner {
             .transpose(),
         )
     })
-}
-
-impl<S: Stream<Item = Result<String>>> Stream for ChunkByLine<S> {
-    type Item = Result<String>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
-        this.stream.as_mut().poll_next(cx)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.stream.size_hint()
-    }
-}
-
-pub trait LinesExt<S: Stream<Item = Result<String>>> {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<S>;
-}
-
-impl<S: Stream<Item = Result<String>>> LinesExt<S> for S {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<S> {
-        ChunkByLine::new(self, delim)
-    }
 }
