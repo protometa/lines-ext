@@ -31,20 +31,30 @@
 //! # }
 //! ```
 
-use core::pin::Pin;
 use futures::future::{self, Ready};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use std::io::Result;
 
-type ChunkByLine<'a> = Pin<Box<dyn Stream<Item = Result<String>> + Send + 'a>>;
-
-pub trait LinesExt<'a, S: Stream<Item = Result<String>> + Send + 'a> {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<'a>;
+pub trait LinesExt<'a, S>
+where
+    S: Stream<Item = Result<String>> + Send + 'a,
+{
+    fn chunk_by_line(
+        self,
+        delim: impl Into<String>,
+    ) -> impl Stream<Item = Result<String>> + Send + 'a;
 }
 
-impl<'a, S: Stream<Item = Result<String>> + Send + 'a> LinesExt<'a, S> for S {
-    fn chunk_by_line(self, delim: &str) -> ChunkByLine<'a> {
-        self.chain(stream::once(future::ready(Ok(delim.to_owned()))))
+impl<'a, S> LinesExt<'a, S> for S
+where
+    S: Stream<Item = Result<String>> + Send + 'a,
+{
+    fn chunk_by_line(
+        self,
+        delim: impl Into<String>,
+    ) -> impl Stream<Item = Result<String>> + Send + 'a {
+        let delim: String = delim.into();
+        self
             // append delim so scanner knows when to dump last
             .chain(stream::once(future::ready(Ok(delim.to_owned()))))
             .scan(String::new(), scanner(delim.to_owned()))
@@ -52,15 +62,13 @@ impl<'a, S: Stream<Item = Result<String>> + Send + 'a> LinesExt<'a, S> for S {
             .try_filter_map(|x| future::ready(Ok(x)))
             // Stream of Result<String>
             .try_filter(|x| future::ready(!x.is_empty()))
-            .boxed()
     }
 }
 
-type FnScanner =
-    Box<dyn Fn(&mut String, Result<String>) -> Ready<Option<Result<Option<String>>>> + Send>;
-
-fn scanner(delim: String) -> FnScanner {
-    Box::new(move |state, line| {
+fn scanner(
+    delim: String,
+) -> impl Fn(&mut String, Result<String>) -> Ready<Option<Result<Option<String>>>> + Send {
+    move |state, line| {
         future::ready(
             line.map(|line| {
                 Some(if line == delim {
@@ -75,5 +83,5 @@ fn scanner(delim: String) -> FnScanner {
             })
             .transpose(),
         )
-    })
+    }
 }
